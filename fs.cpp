@@ -1,8 +1,8 @@
 //COSC 361 Spring 2017
 //FUSE Project Template
 //Group Name
-//Group Member 1 Name
-//Group Member 2 Name
+//Group Member 1 Jeremy Poff
+//Group Member 2 Caleb Fabian
 
 #ifndef __cplusplus
 #error "You must compile this using C++"
@@ -17,6 +17,11 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <fs.h>
+
+// our includes
+#include <fstream>
+#include <iostream>
+#include <map>
 
 using namespace std;
 
@@ -70,6 +75,23 @@ int debugf(const char *fmt, ...)
 }
 #endif
 
+// our typedefs
+typedef unsigned int uint;
+
+typedef map< char *, NODE* > NODEMAP;
+typedef map<char*, map< int, BLOCK* > > BLOCKMAP; 
+
+// a map of file paths to NODE* 
+NODEMAP _nodes;
+// a map or file paths to map<int, BLOCK*>
+// the int is the block number
+// this should make reordering blocks for fs_trunc easier
+BLOCKMAP _blocks;
+
+// a global reference to the header
+BLOCK_HEADER * _header;
+
+
 //////////////////////////////////////////////////////////////////
 //
 // START HERE W/ fs_drive()
@@ -86,6 +108,59 @@ int debugf(const char *fmt, ...)
 int fs_drive(const char *dname)
 {
 	debugf("fs_drive: %s\n", dname);
+	
+	BLOCK_HEADER * header;
+	unsigned int i = 0;
+	unsigned int j = 0;
+    
+	// setup
+	header = (BLOCK_HEADER*) malloc(sizeof(BLOCK_HEADER));
+	ifstream infile(dname, fstream::binary);
+	
+	// set the global header reference
+	_header = header;
+
+	// read in the header
+	infile.read((char*)header, sizeof(BLOCK_HEADER));
+
+	printf("header magic: %s\n", header -> magic);
+
+	NODE * local_node = (NODE*) malloc(sizeof(NODE));
+
+	for ( i = 0 ; i < 1 ; ++i){
+		string name;
+		char ch;
+		uint k = 0;
+		while ((ch = infile.get()) != '\0') {
+			(local_node -> name)[k++] = ch;
+		}
+		(local_node->name)[k] = '\0';
+		printf("file name: %s\n", local_node->name);
+		
+		uint64_t numbuf[8];
+		infile.read((char*)numbuf, sizeof(uint64_t) * 8);
+		local_node -> id = numbuf[0];
+		local_node -> link_id = numbuf[1];
+		local_node -> mode = numbuf[2];
+		local_node -> ctime = numbuf[3];
+		local_node -> atime = numbuf[4];
+		local_node -> mtime = numbuf[5];
+		local_node -> uid = (int32_t) numbuf[6] >> 32;
+		local_node -> gid = (int32_t) numbuf[6];
+		local_node -> size = numbuf[7];
+
+		printf("file: %s\n\tid: %d\n\tlink_id: %d\n\t",
+				local_node->name, local_node->id,
+				local_node->link_id);
+		printf("mode: %d\n\t ctime: %d\n\t, atime: %\n\t",
+				local_node->mode, local_node->ctime, 
+				local_node-> atime);
+
+
+	}
+
+
+
 	return -EIO;
 }
 
