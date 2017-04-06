@@ -112,7 +112,7 @@ objs/fs.o: fs.cpp /usr/include/stdc-predef.h \
  /usr/include/c++/4.8.2/utility /usr/include/c++/4.8.2/bits/stl_relops.h \
  /usr/include/c++/4.8.2/array /usr/include/c++/4.8.2/stdexcept \
  /usr/include/c++/4.8.2/bits/uses_allocator.h \
- /usr/include/c++/4.8.2/bits/stl_multimap.h
+ /usr/include/c++/4.8.2/bits/stl_multimap.h /usr/include/inttypes.h
 
 /usr/include/stdc-predef.h:
 
@@ -445,3 +445,5 @@ fs.h:
 /usr/include/c++/4.8.2/bits/uses_allocator.h:
 
 /usr/include/c++/4.8.2/bits/stl_multimap.h:
+
+/usr/include/inttypes.h:

@@ -22,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <inttypes.h>
 
 using namespace std;
 
@@ -78,11 +79,14 @@ int debugf(const char *fmt, ...)
 // our typedefs
 typedef unsigned int uint;
 
-typedef map< char *, NODE* > NODEMAP;
-typedef map<char*, map< int, BLOCK* > > BLOCKMAP; 
+typedef map< string, NODE * > NODEMAP;
+typedef map< int, BLOCK* > BLOCKMAP; 
+
+typedef pair<string, NODE*> nodepair;
 
 // a map of file paths to NODE* 
 NODEMAP _nodes;
+
 // a map or file paths to map<int, BLOCK*>
 // the int is the block number
 // this should make reordering blocks for fs_trunc easier
@@ -90,6 +94,37 @@ BLOCKMAP _blocks;
 
 // a global reference to the header
 BLOCK_HEADER * _header;
+
+static void print_node(const NODE * local_node){
+	debugf("file: %s\n\tid: %lu\n\tlink_id: %lu\n\t",
+		local_node->name, local_node->id, local_node->link_id);
+    debugf("mode: %lu\n\tctime: %lu\n\tatime: %lu\n\t",
+		local_node->mode, local_node->ctime, local_node-> atime);
+	debugf("mtime: %lu\n\tuid: %u\n\tgid: %u\n\tsize: %lu\n",
+		local_node->mtime, local_node->uid, local_node->gid,local_node->size);
+}
+
+static void print_header( const BLOCK_HEADER * b )
+{
+	debugf("Header:\n");
+	debugf("\tMagic: %s\n", b -> magic);
+	debugf("\tBlock size: %lu\n", b -> block_size);
+	debugf("\tNodes: %lu\n", b -> nodes);
+	debugf("\tBlocks: %lu\n", b -> blocks);
+}
+
+static void print_all_nodes(void)
+{
+	NODEMAP::iterator iv = _nodes.begin();
+	
+	debugf("\nPrinting all nodes in map\n");
+	while ( iv != _nodes.end() )
+	{
+		print_node(iv->second);
+		++iv;
+	}
+}
+
 
 
 //////////////////////////////////////////////////////////////////
@@ -116,52 +151,102 @@ int fs_drive(const char *dname)
 	// setup
 	header = (BLOCK_HEADER*) malloc(sizeof(BLOCK_HEADER));
 	ifstream infile(dname, fstream::binary);
-	
-	// set the global header reference
-	_header = header;
 
 	// read in the header
 	infile.read((char*)header, sizeof(BLOCK_HEADER));
 
-	printf("header magic: %s\n", header -> magic);
-
-	NODE * local_node = (NODE*) malloc(sizeof(NODE));
-
-	for ( i = 0 ; i < 1 ; ++i){
-		string name;
-		char ch;
-		uint k = 0;
-		while ((ch = infile.get()) != '\0') {
-			(local_node -> name)[k++] = ch;
-		}
-		(local_node->name)[k] = '\0';
-		printf("file name: %s\n", local_node->name);
-		
-		uint64_t numbuf[8];
-		infile.read((char*)numbuf, sizeof(uint64_t) * 8);
-		local_node -> id = numbuf[0];
-		local_node -> link_id = numbuf[1];
-		local_node -> mode = numbuf[2];
-		local_node -> ctime = numbuf[3];
-		local_node -> atime = numbuf[4];
-		local_node -> mtime = numbuf[5];
-		local_node -> uid = (int32_t) numbuf[6] >> 32;
-		local_node -> gid = (int32_t) numbuf[6];
-		local_node -> size = numbuf[7];
-
-		printf("file: %s\n\tid: %d\n\tlink_id: %d\n\t",
-				local_node->name, local_node->id,
-				local_node->link_id);
-		printf("mode: %d\n\t ctime: %d\n\t, atime: %\n\t",
-				local_node->mode, local_node->ctime, 
-				local_node-> atime);
-
-
+	// check the magic
+	const string magic = header -> magic;
+	if ( magic != "COSC_361" )
+	{
+		free(header);
+		return -ENOENT;
 	}
 
+	// set the global header reference
+	_header = header;
+
+	debugf("header magic: %s\n", header -> magic);
+
+	NODE * local_node = (NODE*) malloc(sizeof(NODE));
+	
+	print_header(_header);
+
+	for ( i = 0 ; i < _header -> nodes ; ++i){
+		
+		// if its a new iteration, make sure we allocated space
+		// for the node
+		if (local_node == NULL)
+		{
+			local_node = (NODE*) malloc(sizeof(NODE));
+		}
+
+		// read in the file name
+		infile.read( (char*) (&local_node->name), NAME_SIZE);
+		
+		// this will be used for the key in the node map =>  _nodes
+		const string name = local_node -> name;
+
+		// populate the node with the correct data
+		infile.read((char*) (&local_node->id), sizeof(uint64_t) );
+		infile.read( (char*) (&local_node->link_id), sizeof(uint64_t));
+		infile.read( (char*) (&local_node -> mode), sizeof (uint64_t));
+		infile.read( (char*) (&local_node -> ctime), sizeof(uint64_t));
+		infile.read( (char*) (&local_node -> atime), sizeof(uint64_t));
+		infile.read( (char*) (&local_node -> mtime), sizeof(uint64_t) );
+		
+		infile.read( (char*) (&local_node -> uid), sizeof(uint32_t) );
+		infile.read( (char*) (&local_node -> gid), sizeof(uint32_t) );
+		infile.read( (char*) (&local_node -> size), sizeof(uint64_t) );
+		
+
+		// if the node size is > 0 then read in the blocks
+		//   else set node -> blocks = NULL
+		if ( local_node -> size > 0 ){
+			const uint num_blocks = (local_node -> size / _header -> block_size) + 1;
+
+			debugf("%s has %d blocks\n", name.c_str(), num_blocks);
+
+			// malloc the space for the block offsets
+			local_node -> blocks = (uint64_t*) malloc( sizeof(uint64_t) * num_blocks);
+		
+			// read in the block offsets and store them in the node
+			j = 0;
+			while ( j++ < num_blocks)
+			{
+				infile.read( (char*) (local_node -> blocks + j), sizeof(uint64_t));
+			}
+		} else
+		{
+			local_node -> blocks = NULL;
+		}
 
 
-	return -EIO;
+		// add the node to the map
+		pair<string, NODE*> data = pair<string, NODE *>(name, local_node);
+		_nodes.insert( pair<string, NODE*>(name, local_node ));
+
+		// set local node to be null in case we need to make a new one
+		local_node = NULL;
+	}
+
+	print_all_nodes();
+
+
+	// read in the blocks
+	for ( i = 0 ; i < header -> blocks ; ++i )
+	{
+		BLOCK * block = (BLOCK*) malloc(sizeof(BLOCK));
+		block -> data = (char*) malloc( _header -> block_size );
+
+		debugf("Reading block: %d\n", i);
+		infile.read(block->data, _header->block_size);
+		
+		pair<int, BLOCK*> data = pair<int, BLOCK*>(i, block);
+		_blocks.insert(data);
+	}
+
+	return 0;
 }
 
 //////////////////////////////////////////////////////////////////
