@@ -318,7 +318,26 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 int fs_getattr(const char *path, struct stat *s)
 {
 	debugf("fs_getattr: %s\n", path);
-	return -EIO;
+
+	NODEMAP::iterator iv = _nodes.find(path);
+
+	if ( iv == _nodes.end() )
+	{
+		return -EIO;
+	}
+
+	NODE * node = iv -> second;
+	s -> st_mode = node -> mode;
+	s -> st_ino = node -> id;
+	//s -> st_nlink
+	s -> st_uid = node -> uid;
+	s -> st_gid = node -> gid;
+	s -> st_size = node -> size;
+	s -> st_atime = node -> atime;
+	s -> st_mtime = node -> mtime;
+	s -> st_ctime = node -> ctime;
+	s -> st_blksize = _header -> block_size;
+	s -> st_blocks = node -> size / _header -> block_size + 1;
 }
 
 //////////////////////////////////////////////////////////////////
