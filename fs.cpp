@@ -245,7 +245,7 @@ int fs_drive(const char *dname)
 		pair<int, BLOCK*> data = pair<int, BLOCK*>(i, block);
 		_blocks.insert(data);
 	}
-
+	printf("fs_drive complete\n");
 	return 0;
 }
 
@@ -257,7 +257,14 @@ int fs_drive(const char *dname)
 int fs_open(const char *path, struct fuse_file_info *fi)
 {
 	debugf("fs_open: %s\n", path);
-	return -EIO;
+	NODEMAP::iterator iv = _nodes.find(path);
+
+	if ( iv != _nodes.end() )
+	{
+		return 0;
+	}
+
+	return -ENOENT;
 }
 
 //////////////////////////////////////////////////////////////////
@@ -332,12 +339,13 @@ int fs_getattr(const char *path, struct stat *s)
 	//s -> st_nlink
 	s -> st_uid = node -> uid;
 	s -> st_gid = node -> gid;
-	s -> st_size = node -> size;
+	s -> st_size = node -> size; // this part may be wrong
 	s -> st_atime = node -> atime;
 	s -> st_mtime = node -> mtime;
 	s -> st_ctime = node -> ctime;
 	s -> st_blksize = _header -> block_size;
 	s -> st_blocks = node -> size / _header -> block_size + 1;
+	return 0;
 }
 
 //////////////////////////////////////////////////////////////////
@@ -359,6 +367,38 @@ int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	filler(buf, ".", 0, 0);
 	filler(buf, "..", 0, 0);
 
+	NODEMAP::iterator iv = _nodes.find(path);
+	if ( iv == _nodes.end() )
+	{
+		return -ENOENT;
+	}
+
+	// iv points to the "root" node in the subtree that is the directory
+	const string root_path = iv -> second -> name;
+	const size_t root_path_len = root_path.length();
+	debugf("Root path: %s  length: %d\n", root_path.c_str(), root_path_len);
+	
+	// get to the fist contained item
+	++iv;
+	
+	// iter through the values in the subtree based on root
+	while ( iv != _nodes.end() )
+	{
+		string local_path = iv -> second -> name;
+		debugf("local path: %s\n", local_path.c_str());
+		local_path.erase(0, root_path_len);
+		debugf("after erase: %s\n", local_path.c_str());
+		
+		size_t has_slash = local_path.rfind("/");
+		
+		// if no slash is found
+		if ( has_slash == string::npos) 
+		{
+			debugf("should add path: %s\n", local_path.c_str());
+			filler(buf, local_path.c_str(), 0, 0);
+		}
+		++iv;
+	}
 	//You MUST make sure that there is no front slashes in the name (second parameter to filler)
 	//Otherwise, this will FAIL.
 
@@ -373,7 +413,13 @@ int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 int fs_opendir(const char *path, struct fuse_file_info *fi)
 {
 	debugf("fs_opendir: %s\n", path);
-	return -EIO;
+	NODEMAP::iterator iv = _nodes.find(path);
+	if ( iv != _nodes.end() )
+	{
+			return 0;
+	}
+
+	return -ENOENT;
 }
 
 //////////////////////////////////////////////////////////////////
