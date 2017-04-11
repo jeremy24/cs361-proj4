@@ -453,7 +453,19 @@ int fs_chmod(const char *path, mode_t mode)
 int fs_chown(const char *path, uid_t uid, gid_t gid)
 {
 	debugf("fs_chown: %s\n", path);
-	return -EIO;
+	
+	NODEMAP::iterator iv = _nodes.find(path);
+
+	// if not exist
+	if ( iv == _nodes.end() )
+	{
+		return -ENOENT;
+	}
+
+	NODE * node = iv -> second;
+	node -> uid = uid;
+	node -> gid = gid;
+	return 0;
 }
 
 //////////////////////////////////////////////////////////////////
