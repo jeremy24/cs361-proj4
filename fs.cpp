@@ -450,6 +450,7 @@ int fs_chmod(const char *path, mode_t mode)
 //////////////////////////////////////////////////////////////////
 //Change the ownership of <path> to user id <uid> and group id <gid>
 //////////////////////////////////////////////////////////////////
+// this is DONE
 int fs_chown(const char *path, uid_t uid, gid_t gid)
 {
 	debugf("fs_chown: %s\n", path);
@@ -475,10 +476,33 @@ int fs_chown(const char *path, uid_t uid, gid_t gid)
 //be handled by the operating system.
 //Otherwise, delete the file <path> and return 0.
 //////////////////////////////////////////////////////////////////
-int fs_unlink(const char *path)
+
+int fs_unlink(const char *p)
 {
-	debugf("fs_unlink: %s\n", path);
-	return -EIO;
+	debugf("fs_unlink: %s\n", p);
+	
+	const string path = p; // since strings are nicer
+	NODEMAP::iterator iv; // pts to the node in the map
+	
+	// make sure its not a dir
+	const char last_letter = path[ path.length() - 1];
+	if ( last_letter == '\\' || last_letter == '/')
+	{
+		debugf("Invalid: cannot unlink a directory: %s\n", p);
+		return -EISDIR;
+	}
+	// else its just a file
+	iv = _nodes.find(p);
+
+	// make sure it exists
+	if ( iv == _nodes.end() )
+	{
+		return -ENOENT;
+	}
+	
+	_nodes.erase(iv);
+
+	return 0;
 }
 
 //////////////////////////////////////////////////////////////////
