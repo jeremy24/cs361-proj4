@@ -254,6 +254,7 @@ int fs_drive(const char *dname)
 //except see if the file exists. If the file does exist, return 0,
 //otherwise return -ENOENT
 //////////////////////////////////////////////////////////////////
+// this is DONE
 int fs_open(const char *path, struct fuse_file_info *fi)
 {
 	debugf("fs_open: %s\n", path);
@@ -322,6 +323,7 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 //Please see stat for more information on the structure. Not
 //all fields will be filled by your filesystem.
 //////////////////////////////////////////////////////////////////
+// this is DONE
 int fs_getattr(const char *path, struct stat *s)
 {
 	debugf("fs_getattr: %s\n", path);
@@ -410,6 +412,7 @@ int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 //it just checks to see if the directory exists. If it does,
 //return 0, otherwise return -ENOENT
 //////////////////////////////////////////////////////////////////
+// this is DONE
 int fs_opendir(const char *path, struct fuse_file_info *fi)
 {
 	debugf("fs_opendir: %s\n", path);
@@ -425,9 +428,23 @@ int fs_opendir(const char *path, struct fuse_file_info *fi)
 //////////////////////////////////////////////////////////////////
 //Change the mode (permissions) of <path> to <mode>
 //////////////////////////////////////////////////////////////////
+// this is DONE
 int fs_chmod(const char *path, mode_t mode)
 {
-	return -EIO;
+	debugf("fs_chmod: %s %d\n", path, (int) mode);
+	NODEMAP::iterator iv = _nodes.find(path);
+	
+	// if not found
+	if ( iv == _nodes.end() )
+	{
+		return -ENOENT;
+	}
+	
+	// set the new mode
+	NODE * node = iv -> second;
+	node -> mode = mode;
+
+	return 0;
 }
 
 //////////////////////////////////////////////////////////////////
