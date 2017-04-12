@@ -332,7 +332,7 @@ int fs_getattr(const char *path, struct stat *s)
 
 	if ( iv == _nodes.end() )
 	{
-		return -EIO;
+		return -ENOENT;
 	}
 
 	NODE * node = iv -> second;
@@ -347,6 +347,7 @@ int fs_getattr(const char *path, struct stat *s)
 	s -> st_ctime = node -> ctime;
 	s -> st_blksize = _header -> block_size;
 	s -> st_blocks = node -> size / _header -> block_size + 1;
+	debugf("Returning 0 for %s\n", path);
 	return 0;
 }
 
@@ -419,7 +420,7 @@ int fs_opendir(const char *path, struct fuse_file_info *fi)
 	NODEMAP::iterator iv = _nodes.find(path);
 	if ( iv != _nodes.end() )
 	{
-			return 0;
+		return 0;
 	}
 
 	return -ENOENT;
@@ -476,7 +477,7 @@ int fs_chown(const char *path, uid_t uid, gid_t gid)
 //be handled by the operating system.
 //Otherwise, delete the file <path> and return 0.
 //////////////////////////////////////////////////////////////////
-
+// this is DONE
 int fs_unlink(const char *p)
 {
 	debugf("fs_unlink: %s\n", p);
@@ -513,7 +514,44 @@ int fs_unlink(const char *p)
 int fs_mkdir(const char *path, mode_t mode)
 {
 	debugf("fs_mkdir: %s\n", path);
-	return -EIO;
+	
+	NODEMAP::iterator iv = _nodes.find(path);
+
+	// fail if already exists
+	if ( iv != _nodes.end() ) 
+	{
+		return -EEXIST;
+	}
+
+	NODE * node = (NODE*) malloc(sizeof(NODE));
+
+	const string name = path;
+
+	uint i = 0;
+	
+	// copy the name in
+	for ( i = 0 ; i < name.length(); ++i )
+	{
+		(node -> name)[i] = name[i];
+	}
+	
+	// set the \0 ending 
+	(node -> name)[name.length()] = '\0';
+
+	// set the mode
+	node -> mode = mode;
+
+	// make the pair and insert
+	pair<string, NODE*> data = pair<string, NODE *>(name, node);
+	_nodes.insert( data );
+
+	iv = _nodes.find(path);
+	if ( iv == _nodes.end())
+	{
+		debugf("Error inserting a new directory node\n");
+	}
+
+	return 0;
 }
 
 //////////////////////////////////////////////////////////////////
@@ -524,6 +562,22 @@ int fs_mkdir(const char *path, mode_t mode)
 int fs_rmdir(const char *path)
 {
 	debugf("fs_rmdir: %s\n", path);
+
+	NODEMAP::iterator iv = _nodes.find(path);
+
+	if ( iv == _nodes.end())
+	{
+		return -ENOENT;
+	}
+
+	NODEMAP::iterator itor = _nodes.begin();
+
+	while ( itor != _nodes.end() )
+	{
+		printf("%s\n", itor -> second -> name);
+		++itor;
+	}
+
 	return -EIO;
 }
 
@@ -536,7 +590,35 @@ int fs_rmdir(const char *path)
 int fs_rename(const char *path, const char *new_name)
 {
 	debugf("fs_rename: %s -> %s\n", path, new_name);
-	return -EIO;
+
+	NODEMAP::iterator iv = _nodes.find(path);
+	
+	if ( iv == _nodes.end())
+	{
+		return -ENOENT;
+	}
+	
+	NODE * node = iv -> second;
+	const string name = new_name;
+	
+	uint i = 0;
+
+	// copy the name in
+	for ( i = 0 ; i < name.length(); ++i )
+	{
+		(node -> name)[i] = name[i];
+    }
+    // set the \0 ending
+	(node -> name)[name.length()] = '\0';
+	
+	// delete the old tree copy since you cant rename keys
+	_nodes.erase(iv);
+
+    // make the pair and insert
+	pair<string, NODE*> data = pair<string, NODE *>(name, node);
+	_nodes.insert( data );
+
+	return 0;
 }
 
 //////////////////////////////////////////////////////////////////
