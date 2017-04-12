@@ -387,20 +387,43 @@ int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	// iter through the values in the subtree based on root
 	while ( iv != _nodes.end() )
 	{
+		
 		string local_path = iv -> second -> name;
 		debugf("local path: %s\n", local_path.c_str());
+		
+		size_t contains_root = local_path.find(root_path);
+
+		// make sure the local path is under the root path
+		if ( contains_root == string::npos ) 
+		{
+			++iv;
+			debugf("%s not under root path\n", local_path.c_str());
+			continue;
+		}
+
+		
 		local_path.erase(0, root_path_len);
 		debugf("after erase: %s\n", local_path.c_str());
 		
 		size_t has_slash = local_path.rfind("/");
 		
-		// if no slash is found
+		// if no slash is found or only a leading slash is found
 		if ( has_slash == string::npos) 
 		{
 			debugf("should add path: %s\n", local_path.c_str());
 			filler(buf, local_path.c_str(), 0, 0);
 		}
+		
+		// if its a sub dir
+		if ( has_slash == 0 )
+		{	
+			debugf("its a subdir: %s\n", local_path.c_str());
+			local_path.erase(0,1);
+			filler(buf, local_path.c_str(), 0, 0);
+		}
+
 		++iv;
+		
 	}
 	//You MUST make sure that there is no front slashes in the name (second parameter to filler)
 	//Otherwise, this will FAIL.
@@ -539,7 +562,8 @@ int fs_mkdir(const char *path, mode_t mode)
 	(node -> name)[name.length()] = '\0';
 
 	// set the mode
-	node -> mode = mode;
+	node -> mode = mode | S_IFDIR;
+
 
 	// make the pair and insert
 	pair<string, NODE*> data = pair<string, NODE *>(name, node);
@@ -587,6 +611,7 @@ int fs_rmdir(const char *path)
 //the new_name's path doesn't exist return -ENOENT. If
 //you were able to rename the node, then return 0.
 //////////////////////////////////////////////////////////////////
+// this is DONE
 int fs_rename(const char *path, const char *new_name)
 {
 	debugf("fs_rename: %s -> %s\n", path, new_name);
