@@ -80,7 +80,7 @@ int debugf(const char *fmt, ...)
 typedef unsigned int uint;
 
 typedef map< string, NODE * > NODEMAP;
-typedef map< int, BLOCK* > BLOCKMAP; 
+typedef map< int64_t, BLOCK* > BLOCKMAP; 
 
 typedef pair<string, NODE*> nodepair;
 
@@ -102,6 +102,16 @@ static void print_node(const NODE * local_node){
 		local_node->mode, local_node->ctime, local_node-> atime);
 	debugf("mtime: %lu\n\tuid: %u\n\tgid: %u\n\tsize: %lu\n",
 		local_node->mtime, local_node->uid, local_node->gid,local_node->size);
+
+	const uint num = local_node -> size > 0 ? local_node -> size / _header->block_size + 1 : 0;
+	uint i = 0;
+	debugf("\tnum blocks: %d\n", num);
+	debugf("\tblocks: ");
+	while (i++ < num)
+	{
+		debugf("%d, ", (local_node -> blocks)[i]);
+	}
+	debugf("\n");
 }
 
 static void print_header( const BLOCK_HEADER * b )
@@ -146,7 +156,7 @@ int fs_drive(const char *dname)
 	
 	BLOCK_HEADER * header;
 	unsigned int i = 0;
-	unsigned int j = 0;
+	uint64_t j = 0;
     
 	// setup
 	header = (BLOCK_HEADER*) malloc(sizeof(BLOCK_HEADER));
@@ -234,15 +244,16 @@ int fs_drive(const char *dname)
 
 
 	// read in the blocks
-	for ( i = 0 ; i < header -> blocks ; ++i )
+	j = 0;
+	for ( j = 0 ; j < header -> blocks ; ++j )
 	{
 		BLOCK * block = (BLOCK*) malloc(sizeof(BLOCK));
 		block -> data = (char*) malloc( _header -> block_size );
 
-		debugf("Reading block: %d\n", i);
+		debugf("Reading block: %d\n", j);
 		infile.read(block->data, _header->block_size);
 		
-		pair<int, BLOCK*> data = pair<int, BLOCK*>(i, block);
+		pair<int64_t, BLOCK*> data = pair<int64_t, BLOCK*>(j, block);
 		_blocks.insert(data);
 	}
 	printf("fs_drive complete\n");
@@ -277,6 +288,30 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 	    struct fuse_file_info *fi)
 {
 	debugf("fs_read: %s\n", path);
+
+	NODEMAP::const_iterator iv = _nodes.find(path);
+	const NODE * node = iv -> second;
+	const uint num_blocks = node -> size / _header -> block_size + 1;
+	BLOCK * blocks[num_blocks];
+
+	uint i = 0;
+	
+	debugf("has %d blocks\n", num_blocks);
+
+	for ( i = 0 ; i < num_blocks ; ++i )
+	{
+		print_node(node);
+		const uint64_t block_no = *((node -> blocks) + i);
+		debugf("b no: %d\n", block_no);
+
+		BLOCKMAP::const_iterator bv = _blocks.find(block_no);
+		
+
+		debugf("blocks[%d] is block_no %d\n", i , block_no);
+		blocks[i] = bv -> second;
+	}
+
+	
 	return -EIO;
 }
 
