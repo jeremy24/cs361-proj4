@@ -107,9 +107,9 @@ static void print_node(const NODE * local_node){
 	uint i = 0;
 	debugf("\tnum blocks: %d\n", num);
 	debugf("\tblocks: ");
-	while (i++ < num)
+	while (i < num)
 	{
-		debugf("%d, ", (local_node -> blocks)[i]);
+		debugf("%d, ", (local_node -> blocks)[i++]);
 	}
 	debugf("\n");
 }
@@ -222,9 +222,10 @@ int fs_drive(const char *dname)
 		
 			// read in the block offsets and store them in the node
 			j = 0;
-			while ( j++ < num_blocks)
+			while ( j < num_blocks)
 			{
 				infile.read( (char*) (local_node -> blocks + j), sizeof(uint64_t));
+				++j;
 			}
 		} else
 		{
@@ -252,7 +253,9 @@ int fs_drive(const char *dname)
 
 		debugf("Reading block: %d\n", j);
 		infile.read(block->data, _header->block_size);
-		
+	
+		debugf("data for %d\n%s\n", j, block->data);
+
 		pair<int64_t, BLOCK*> data = pair<int64_t, BLOCK*>(j, block);
 		_blocks.insert(data);
 	}
@@ -288,31 +291,98 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 	    struct fuse_file_info *fi)
 {
 	debugf("fs_read: %s\n", path);
+	
+	debugf("\tsize: %d\n",(int) size);
+	debugf("\toffset: %d\n",(int) offset);
+
+
 
 	NODEMAP::const_iterator iv = _nodes.find(path);
 	const NODE * node = iv -> second;
-	const uint num_blocks = node -> size / _header -> block_size + 1;
+	const uint num_blocks = node -> size > 0 ?  node ->size / _header -> block_size + 1 : 0;
 	BLOCK * blocks[num_blocks];
 
 	uint i = 0;
 	
-	debugf("has %d blocks\n", num_blocks);
+	//debugf("has %d blocks\n", num_blocks);
 
-	for ( i = 0 ; i < num_blocks ; ++i )
+	BLOCKMAP::iterator bv = _blocks.end();
+
+	debugf("\nthe node\n");
+	print_node(iv->second);
+	debugf("\n");
+
+	// get the blocks for this path
+	debugf("blocks\n\t");
+	while (i < num_blocks)
 	{
-		print_node(node);
-		const uint64_t block_no = *((node -> blocks) + i);
-		debugf("b no: %d\n", block_no);
+		bv = _blocks.end();
+		const uint block_num = node ->blocks[i];
+		debugf("i = %d block = %d, ", i, block_num);
+		bv = _blocks.find(block_num);
+		if ( bv == _blocks.end() )
+		{
+			return -EIO;
+		}
+		debugf("\nGot block %d, storing at blocks[%d]\n", block_num,  i);
+		blocks[i] = bv ->second;
+		debugf("data:\n%s\n", blocks[i]->data);
+		++i;
+	}
+	
+	debugf("\n");
+	
+	// find which block to use and where to start the copy
+	const uint block_wanted = offset / _header->block_size;
+	const uint new_offset = offset % _header->block_size;
 
-		BLOCKMAP::const_iterator bv = _blocks.find(block_no);
-		
+	uint other_block_amount = -1;
 
-		debugf("blocks[%d] is block_no %d\n", i , block_no);
-		blocks[i] = bv -> second;
+	//debugf("Data is at block index: %d with offset: %d\n", block_wanted, new_offset);
+	
+	// if new_offset != 0 => may need to read across blocks
+
+	if ( block_wanted >= num_blocks )
+	{
+		debugf("invalid block number wanted\n");
+		return -EIO;
+	}
+	if ( new_offset >= _header->block_size )
+	{
+		debugf("new_offset is >= block_size\n");
+		return -EIO;
 	}
 
+	if (false &&  size > _header->block_size - new_offset )
+	{
+		
+	}
+
+	//debugf("blocks[0]\n%s\n", blocks[0]);
+
+	const BLOCK * b_to_use = blocks[block_wanted];
+	char * data = b_to_use -> data;
+	const char * src = (char*) (data + new_offset);
+	uint bytes_read = 0;
+
+	//debugf("copying %d bytes into buf\n", size);
+	//debugf("\n%s\n", (char*) src);
 	
-	return -EIO;
+	char * t = "t\0";
+
+	uint j = 0;
+	for ( j = 0 ; j < size ; ++j )
+	{
+		buf[j] = src[j];
+		++bytes_read;
+	}
+
+	//debugf("buf:\n%s\n", buf);
+
+	//memcpy((void*) buf, t, 2);
+
+	debugf("bytes read: %d\n", bytes_read);
+	return bytes_read;
 }
 
 //////////////////////////////////////////////////////////////////
