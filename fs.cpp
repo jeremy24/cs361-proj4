@@ -95,6 +95,8 @@ BLOCKMAP _blocks;
 // a global reference to the header
 BLOCK_HEADER * _header;
 
+unsigned int _next_block_id = -1;
+
 static void print_node(const NODE * local_node){
 	debugf("file: %s\n\tid: %lu\n\tlink_id: %lu\n\t",
 		local_node->name, local_node->id, local_node->link_id);
@@ -243,6 +245,8 @@ int fs_drive(const char *dname)
 
 	print_all_nodes();
 
+	// set the _next_block_id
+	_next_block_id = (int) header -> blocks;
 
 	// read in the blocks
 	j = 0;
@@ -294,7 +298,7 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 	
 	debugf("\tsize: %d\n",(int) size);
 	debugf("\toffset: %d\n",(int) offset);
-
+	debugf("block_size: %d\n", _header -> block_size);
 
 
 	NODEMAP::const_iterator iv = _nodes.find(path);
@@ -313,6 +317,7 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 	debugf("\n");
 
 	// get the blocks for this path
+	// and store their pointers into an array in order
 	debugf("blocks\n\t");
 	while (i < num_blocks)
 	{
@@ -336,50 +341,80 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 	const uint block_wanted = offset / _header->block_size;
 	const uint new_offset = offset % _header->block_size;
 
-	uint other_block_amount = -1;
-
 	//debugf("Data is at block index: %d with offset: %d\n", block_wanted, new_offset);
 	
 	// if new_offset != 0 => may need to read across blocks
-
+	
+	// make sure we're tryinbg to start the read at a valid block
 	if ( block_wanted >= num_blocks )
 	{
 		debugf("invalid block number wanted\n");
 		return -EIO;
 	}
-	if ( new_offset >= _header->block_size )
-	{
-		debugf("new_offset is >= block_size\n");
-		return -EIO;
-	}
 
-	if (false &&  size > _header->block_size - new_offset )
-	{
-		
-	}
+	// this is not an error
+	//if ( new_offset >= _header->block_size )
+	//{
+	//	debugf("new_offset is >= block_size\n");
+	//	return -EIO;
+	//}
 
-	//debugf("blocks[0]\n%s\n", blocks[0]);
-
-	const BLOCK * b_to_use = blocks[block_wanted];
-	char * data = b_to_use -> data;
-	const char * src = (char*) (data + new_offset);
-	uint bytes_read = 0;
-
-	//debugf("copying %d bytes into buf\n", size);
-	//debugf("\n%s\n", (char*) src);
 	
-	char * t = "t\0";
+	// make a buffer that will hold all of the data from the starting block to
+	// the end of the file
+	// this is not efficient, but its very simple
+	char * data = (char*) malloc(sizeof(char) * ((num_blocks - block_wanted)) * _header -> block_size);
 
 	uint j = 0;
+
+	// for each block
+	//	copy that data into our buffer
+	//	this will make all blocks be in a sequential char * buffer
+	//	that we can read from below
+	for ( j = 0 ; j < num_blocks - block_wanted ; ++j )
+	{
+		uint k = 0;
+		for ( k = 0 ; k < _header -> block_size ; ++k )
+		{
+			uint block_offset = j * _header -> block_size;
+			data[ block_offset + k] = blocks[block_wanted+j] -> data[k];
+		}
+		//data[j * _header -> block_size]
+	}
+
+	debugf("Data in our buffer:\n%s", data);
+
+	//set the src for the copy below
+	const char * src = (char*) (data) + new_offset;
+	uint bytes_read = 0;
+
+	// see the max number of readable bytes
+	//   this is the start pos of the start block all the way to the end of the 
+	//   known blocks for this file
+	const uint readable_bytes = ((num_blocks - block_wanted) * _header -> block_size) - offset;
+
+
+	// check the number of readable bytes
+	//	if size > readable_bytes
+	//	then set size = readable_bytes
+	if ( size > readable_bytes )
+	{
+		debugf("Trying to read more bytes than the file has\n");
+		debugf("\tReadable bytes: %d\n\tSize: %d\n\tnum blocks: %d\n\tblock wanted: %d\n",
+				readable_bytes, size, num_blocks, block_wanted);
+		debugf("block size: %d\n", _header -> block_size);
+		debugf("%d\n%d\n%d\n", num_blocks-block_wanted, (num_blocks-block_wanted) * _header-> block_size,
+				((num_blocks-block_wanted)*_header->block_size)-offset);
+		debugf("truncating size down from %d to %d\n", size, readable_bytes);
+		size = readable_bytes;
+	}
+	
+	//copy the data from our buffer into the OS provided buffer
 	for ( j = 0 ; j < size ; ++j )
 	{
 		buf[j] = src[j];
 		++bytes_read;
 	}
-
-	//debugf("buf:\n%s\n", buf);
-
-	//memcpy((void*) buf, t, 2);
 
 	debugf("bytes read: %d\n", bytes_read);
 	return bytes_read;
@@ -440,13 +475,27 @@ int fs_getattr(const char *path, struct stat *s)
 		return -ENOENT;
 	}
 
+	// get the number of blocks this node has
+	const unsigned int num_blocks = (iv -> second -> size /  _header -> block_size) + 1;
+	
+	// this is for displaying the stats
+	//   its 512 * number of blocks
+	const unsigned int display_block_size = 512;
+	
+	const float multiplier =  _header -> block_size / display_block_size;
+
+	// check if its a directory
+	const bool is_dir = (iv -> second -> mode & S_IFDIR) == S_IFDIR;
+
+
 	NODE * node = iv -> second;
 	s -> st_mode = node -> mode;
 	s -> st_ino = node -> id;
 	//s -> st_nlink
 	s -> st_uid = node -> uid;
 	s -> st_gid = node -> gid;
-	s -> st_size = node -> size; // this part may be wrong
+	// if its a dir then the size should be 0
+	s -> st_size = is_dir ?  0 : (float) num_blocks * (float) display_block_size * (float) multiplier; // this part may be wrong
 	s -> st_atime = node -> atime;
 	s -> st_mtime = node -> mtime;
 	s -> st_ctime = node -> ctime;
