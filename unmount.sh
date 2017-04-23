@@ -1,4 +1,4 @@
-chmod 777 ~/source
+chmod 777 ~/sourceZ
 chmod 777 ~/source/cs361
 chmod 777 ~/source/cs361/project4
 

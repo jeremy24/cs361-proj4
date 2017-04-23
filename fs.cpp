@@ -433,7 +433,67 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 	     struct fuse_file_info *fi)
 {
 	debugf("fs_write: %s\n", path);
-	return -EIO;
+
+	if ((fi->flags & O_RDONLY) == O_RDONLY) {
+		debugf ("fs_write: File %s is read only.\n", path);
+		return -EROFS;
+	}
+
+	NODEMAP::const_iterator iv = _nodes.find (path);
+
+	if (iv == _nodes.end ()) {
+		debugf ("fs_write: File %s doesn't exist. Creating new file.\n", path);
+		return -ENOENT;
+	}
+
+	NODE *node = iv->second;
+
+	if (node->size == 0) {
+		debugf ("fs_write: %s is a directory.\n", path);
+		return -EISDIR;
+	}
+
+	uint num_blocks = (node->size > 0) ? (node->size / _header->block_size + 1) : 0;
+
+	uint num_blocks_needed = ((size) / _header->block_size);
+	if (((size) % _header->block_size) != 0) {
+		num_blocks_needed ++;
+	}
+
+	uint start_block = (offset / _header->block_size);
+	uint offset_in_block = (offset % _header->block_size);
+
+	uint i = 0;
+	if (num_blocks_needed > num_blocks) {
+		node->blocks = (uint64_t *) realloc (node->blocks, (num_blocks_needed * sizeof (uint64_t)));
+		for (i = num_blocks; i < num_blocks_needed; i ++) {
+			BLOCK *block = (BLOCK *) malloc (sizeof (BLOCK));
+			block->data = (char *) malloc (sizeof (char) * _header->block_size);
+			_blocks.insert (std::pair <int, BLOCK *> (_next_block_id, block));
+			node->blocks [i] = _next_block_id ++;
+		}
+	}
+
+	i = start_block; //count for blocks
+	uint j = offset_in_block; //count for block data
+	uint k = 0; //count for write data
+	uint block_id = 0;
+	while (i < num_blocks_needed) {
+		block_id = node->blocks [i];
+		while (j < _header->block_size) {
+			if (k == size) {
+				break;
+			} else {
+				_blocks.find (block_id)->second->data [j] = data [k];
+				k ++;
+			}
+			j ++;
+		}
+		j = 0; //offset doesn't matter after first block
+		i ++;
+	}
+
+	return 0;
 }
 
 //////////////////////////////////////////////////////////////////
@@ -457,11 +517,15 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 		node -> name[i] = name[i];
 	}
 
-	node -> mode = fi -> flags | S_IFREG;
+	node -> mode = (mode | S_IFREG);
+	time_t current_time = time (NULL);
+	node -> atime = current_time;
+	node -> mtime = current_time;
+	node -> ctime = current_time;
 	
 	_nodes.insert( pair<string, NODE*>(name, node) );
 	
-	return -EIO;
+	return 0;
 }
 
 //////////////////////////////////////////////////////////////////
