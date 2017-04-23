@@ -2,7 +2,7 @@
 //FUSE Project Template
 //Group Name
 //Group Member 1 Jeremy Poff
-//Group Member 2 Caleb Fabian
+//Group Member 2 Caleb Faban
 
 #ifndef __cplusplus
 #error "You must compile this using C++"
