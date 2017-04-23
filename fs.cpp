@@ -447,6 +447,20 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
 	debugf("fs_create: %s\n", path);
+	NODE * node;
+	node = (NODE*) malloc( sizeof(NODE) );
+	uint i = 0;
+	string name = path;
+
+	for ( i = 0 ; i < name.length() ; ++i)
+	{
+		node -> name[i] = name[i];
+	}
+
+	node -> mode = fi -> flags | S_IFREG;
+	
+	_nodes.insert( pair<string, NODE*>(name, node) );
+	
 	return -EIO;
 }
 
