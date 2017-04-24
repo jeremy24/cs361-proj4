@@ -399,9 +399,10 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 	// see the max number of readable bytes
 	//   this is the start pos of the start block all the way to the end of the 
 	//   known blocks for this file
-	unsigned int readable_bytes = ((num_blocks - block_wanted) * _header -> block_size) - offset;
+	unsigned int data_length = (num_blocks - block_wanted) * _header -> block_size;
+	unsigned int readable_bytes = (data_length) - offset;
 
-	debugf("\tfile size: %d\n\treadable bytes: %d\n\trequested read size: %d\n",
+	debugf("\n\nSTATS\n\tfile size: %d\n\treadable bytes: %d\n\trequested read size: %d\n",
 			node -> size, readable_bytes, size);
 
 	// check the number of readable bytes
@@ -483,20 +484,27 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 
 	debugf("\tnum blocks = %d\n", num_blocks);
 
-	uint num_blocks_needed = ((size) / _header->block_size);
-	if (((size) % _header->block_size) != 0) {
-		num_blocks_needed ++;
-	}
+	uint num_blocks_needed = ((size) / _header->block_size) + 1;
 
 	debugf("\tblocks needed: %d\n", num_blocks_needed);
 
 	uint start_block = (offset / _header->block_size);
 	uint offset_in_block = (offset % _header->block_size);
 
+	
+	
+
+	
+	//return size;
+
+
+
+
+
 	debugf("\tstart block: %d\n\toffset in start: %d\n", start_block, offset_in_block);
 
 	uint i = 0;
-	if (num_blocks_needed > num_blocks) {
+	if (num_blocks_needed > num_blocks-start_block) {
 		//make the block index array bigger
 		node->blocks = (uint64_t *) realloc (node->blocks, (num_blocks_needed * sizeof (uint64_t)));
 		
@@ -515,8 +523,11 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 	const unsigned int old_bytes = node -> size - offset;
 	const unsigned int new_size = old_bytes + size;
 
-	node -> size = new_size;
+	node -> size += new_size;
 
+//	return size;
+
+	
 
 	debugf("\nafter block add\n");
 	print_node(node);
@@ -525,22 +536,36 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 	uint j = offset_in_block; //count for block data
 	uint k = 0; //count for write data
 	uint block_id = 0;
-	while (i < num_blocks_needed) {
+//	debugf("\twriting data to node->block[%d]\n", i);
+
+	debugf ("\t j = %d\n", j);
+	debugf("\nstarting write\n\n");
+	while (i < num_blocks_needed, k < size) {
 		block_id = node->blocks [i];
-		while (j < _header->block_size) {
-			if (k == size) {
-				break;
-			} else {
-				_blocks.find (block_id)->second->data [j] = data [k];
-				k ++;
-			}
-			j ++;
+		BLOCKMAP::iterator bv = _blocks.find(block_id);
+	
+		debugf("\twriting node -> blocks[%d] with id %d\n|", i, block_id);
+
+		if ( bv == _blocks.end() )
+		{
+			return -EIO;
 		}
+
+		BLOCK * block = bv -> second;
+
+		while (j < _header->block_size , k < size) {
+			block -> data[j] = data[k];
+			++k;
+			++j;
+		}
+		debugf("\twrote %d bytes\n", k);
+		debugf("\tDATA\n %s", block -> data);
 		j = 0; //offset doesn't matter after first block
 		i ++;
 	}
 
-	return size;
+
+	return k;
 }
 
 //////////////////////////////////////////////////////////////////
@@ -579,7 +604,6 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	node -> mtime = current_time;
 	node -> ctime = current_time;
 	node -> size = 0;
-
 
 	debugf("adding node\n");
 	print_node(node);
