@@ -112,7 +112,14 @@ objs/fs.o: fs.cpp /usr/include/stdc-predef.h \
  /usr/include/c++/4.8.2/utility /usr/include/c++/4.8.2/bits/stl_relops.h \
  /usr/include/c++/4.8.2/array /usr/include/c++/4.8.2/stdexcept \
  /usr/include/c++/4.8.2/bits/uses_allocator.h \
- /usr/include/c++/4.8.2/bits/stl_multimap.h /usr/include/inttypes.h
+ /usr/include/c++/4.8.2/bits/stl_multimap.h /usr/include/inttypes.h \
+ /usr/include/c++/4.8.2/vector \
+ /usr/include/c++/4.8.2/bits/stl_construct.h \
+ /usr/include/c++/4.8.2/ext/alloc_traits.h \
+ /usr/include/c++/4.8.2/bits/stl_uninitialized.h \
+ /usr/include/c++/4.8.2/bits/stl_vector.h \
+ /usr/include/c++/4.8.2/bits/stl_bvector.h \
+ /usr/include/c++/4.8.2/bits/vector.tcc
 
 /usr/include/stdc-predef.h:
 
@@ -447,3 +454,17 @@ fs.h:
 /usr/include/c++/4.8.2/bits/stl_multimap.h:
 
 /usr/include/inttypes.h:
+
+/usr/include/c++/4.8.2/vector:
+
+/usr/include/c++/4.8.2/bits/stl_construct.h:
+
+/usr/include/c++/4.8.2/ext/alloc_traits.h:
+
+/usr/include/c++/4.8.2/bits/stl_uninitialized.h:
+
+/usr/include/c++/4.8.2/bits/stl_vector.h:
+
+/usr/include/c++/4.8.2/bits/stl_bvector.h:
+
+/usr/include/c++/4.8.2/bits/vector.tcc:

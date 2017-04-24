@@ -23,6 +23,7 @@
 #include <iostream>
 #include <map>
 #include <inttypes.h>
+#include <vector>
 
 using namespace std;
 
@@ -456,6 +457,8 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 
 	debugf("\tsize: %d\n\toffset: %d\n\n", size, offset);
 
+	
+
 	if ((fi->flags & O_RDONLY) == O_RDONLY) {
 		debugf ("fs_write: File %s is read only.\n", path);
 		//return -EROFS;
@@ -504,6 +507,8 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 			node->blocks [i] = _next_block_id;
 			debugf("\tadded block with id: %d at node->block[%d]\n", _next_block_id, i);
 			++_next_block_id;
+			//inc the total number of blocks
+			_header -> blocks += 1;
 		}
 	}
 
@@ -559,6 +564,15 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 		node -> name[i] = name[i];
 	}
 
+	if ( fi -> flags & O_RDONLY ) {
+		return -EROFS;
+	}
+
+	if ( name.length() > NAME_SIZE )
+	{
+		return -ENAMETOOLONG;
+	}
+
 	node -> mode = (mode | S_IFREG);
 	time_t current_time = time (NULL);
 	node -> atime = current_time;
@@ -569,6 +583,7 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 
 	debugf("adding node\n");
 	print_node(node);
+	_header -> nodes += 1;
 	_nodes.insert( pair<string, NODE*>(name, node) );
 	
 	return 0;
@@ -804,9 +819,22 @@ int fs_unlink(const char *p)
 	// make sure it exists
 	if ( iv == _nodes.end() )
 	{
-		return -ENOENT;
+		debugf("\ttrying to unlink a file that doesnt exist\n");
+		return 0;
+		//return -ENOENT;
 	}
 	
+	uint num_blocks = iv -> second -> size == 0 ? 0 : iv -> second -> size / _header -> block_size + 1;
+
+	for ( uint i = 0 ; i < num_blocks ; ++i )
+	{
+		uint id = iv -> second -> blocks[i];
+		debugf("\tremoving block: %d\n", id);
+		_blocks.erase(_blocks.find(id));
+		_header -> blocks -= 1;
+	}
+
+	_header -> nodes -= 1;
 	_nodes.erase(iv);
 
 	return 0;
@@ -852,6 +880,8 @@ int fs_mkdir(const char *path, mode_t mode)
 	pair<string, NODE*> data = pair<string, NODE *>(name, node);
 	_nodes.insert( data );
 
+	_header -> nodes += 1;
+
 	iv = _nodes.find(path);
 	if ( iv == _nodes.end())
 	{
@@ -877,15 +907,36 @@ int fs_rmdir(const char *path)
 		return -ENOENT;
 	}
 
-	NODEMAP::iterator itor = _nodes.begin();
+	NODE * node = iv -> second;
 
-	while ( itor != _nodes.end() )
+
+	unsigned int children = 0;
+	const string root_path = node -> name;
+	iv++;
+
+	while ( iv != _nodes.end() ) 
 	{
-		printf("%s\n", itor -> second -> name);
-		++itor;
+		string local_path = iv -> second -> name;
+		size_t contains_root = local_path.find(root_path);
+		if ( contains_root != string::npos )
+		{
+			debugf("\t%s contains %s\n", root_path.c_str(), local_path.c_str());
+			children++;
+		}
+		iv++;
+	}
+	
+	// if have kids, return error
+	if ( children != 0 )
+	{
+		return -ENOTEMPTY;
 	}
 
-	return -EIO;
+	_header -> nodes -= 1;
+	_nodes.erase(_nodes.find(path));
+
+	//return 0, its empty
+	return 0;
 }
 
 //////////////////////////////////////////////////////////////////
@@ -905,7 +956,13 @@ int fs_rename(const char *path, const char *new_name)
 	{
 		return -ENOENT;
 	}
-	
+
+	if (_nodes.find(new_name) == _nodes.end() )
+	{
+		debugf("\tnew path does not exist");
+		return -ENOENT;
+	}
+
 	NODE * node = iv -> second;
 	const string name = new_name;
 	
@@ -997,6 +1054,8 @@ int fs_truncate(const char *path, off_t size)
 		node -> blocks[i] = block_ids[i];
 	}
 
+	const uint blocks_removed = num_blocks - num_to_keep;
+	_header -> blocks -= blocks_removed;
 
 	BLOCKMAP::iterator bv;
 	
@@ -1029,6 +1088,38 @@ int fs_truncate(const char *path, off_t size)
 	return 0;
 }
 
+
+static void dump_node(ofstream & out, NODEMAP::iterator iv)
+{
+	NODE * node = iv -> second;
+	debugf("dump node: %s\n", node -> name);
+	debugf("\nwriting name\n");
+	out.write((char*)node->name, NAME_SIZE);
+	
+	uint64_t buf[7];
+	buf[0] = node -> id;
+	buf[1] = node -> link_id;
+	buf[2] = node -> mode;
+	buf[3] = node -> ctime;
+	buf[4] = node -> atime;
+	buf[5] = node -> mtime;
+	buf[6] = node -> size;
+
+	uint32_t buf2[2];
+	buf2[0] = node -> uid;
+	buf2[1] = node -> gid;
+
+	debugf("\twriting buf\n");
+	out.write((char*)buf, sizeof(uint64_t) * 6);
+	debugf("\twrigint buf2\n");
+	out.write((char*)buf2, sizeof(uint32_t) * 2);
+	debugf("\twriting size\n");
+	debugf("\tsize: %d\n", buf[6]);
+	out.write((char*) (buf+6), sizeof(uint64_t));
+}
+
+
+
 //////////////////////////////////////////////////////////////////
 //fs_destroy is called when the mountpoint is unmounted
 //this should save the hard drive back into <filename>
@@ -1037,6 +1128,56 @@ void fs_destroy(void *ptr)
 {
 	const char *filename = (const char *)ptr;
 	debugf("fs_destroy: %s\n", filename);
+
+	ofstream out(filename, ofstream::binary);
+
+	debugf("\tThe header\n");
+	print_header(_header);
+
+	out.write((char*)_header, sizeof(BLOCK_HEADER));
+
+	map<uint64_t, uint64_t> name_map;
+
+	BLOCKMAP::iterator bv = _blocks.begin();
+	uint64_t new_index = 0;
+
+	while ( bv != _blocks.end() )
+	{
+		pair<uint64_t, uint64_t> data = pair<uint64_t, uint64_t>( bv -> first, new_index);
+		name_map.insert( data );
+		debugf("\tblock %d gets mapped to %d\n", bv -> first, new_index);
+		bv++;
+		++new_index;
+	}
+
+
+	NODEMAP::iterator iv = _nodes.begin();
+
+	while( iv != _nodes.end() )
+	{
+		debugf("\tdumping node: %s\n", iv -> second -> name);
+		dump_node(out, iv);
+		NODE * node = iv -> second;
+		uint num_blocks = (node -> size > 0) ?  node -> size / _header -> block_size + 1 : 0;
+		debugf("\tstarting to write %d block offsets\n", num_blocks);
+		for ( int i = 0 ; i < num_blocks ; ++i )
+		{
+			uint64_t new_i = name_map.find( node -> blocks[i] ) -> second;
+			out.write((char*)&new_i, sizeof(uint64_t));
+		}
+		iv++;
+	}
+
+	
+	bv = _blocks.begin();
+
+	while ( bv != _blocks.end() )
+	{
+		out.write(bv -> second -> data, _header -> block_size);
+		bv++;
+	}
+
+	out.close();
 
 	//Save the internal data to the hard drive
 	//specified by <filename>
