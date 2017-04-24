@@ -308,7 +308,7 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 
 	uint i = 0;
 	
-	//debugf("has %d blocks\n", num_blocks);
+	debugf("has %d blocks\n", num_blocks);
 
 	BLOCKMAP::iterator bv = _blocks.end();
 
@@ -318,12 +318,12 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 
 	// get the blocks for this path
 	// and store their pointers into an array in order
-	debugf("blocks\n\t");
+	debugf("\tBlocks:\n\t");
 	while (i < num_blocks)
 	{
 		bv = _blocks.end();
 		const uint block_num = node ->blocks[i];
-		debugf("i = %d block = %d, ", i, block_num);
+		debugf("\ti = %d block = %d, ", i, block_num);
 		bv = _blocks.find(block_num);
 		if ( bv == _blocks.end() )
 		{
@@ -345,6 +345,13 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 	
 	// if new_offset != 0 => may need to read across blocks
 	
+	// if the size is 0 do nothing
+	if ( node -> size == 0 )
+	{
+		debugf("\tThis file has no data\n");
+		return 0;
+	}
+
 	// make sure we're tryinbg to start the read at a valid block
 	if ( block_wanted >= num_blocks )
 	{
@@ -391,8 +398,10 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 	// see the max number of readable bytes
 	//   this is the start pos of the start block all the way to the end of the 
 	//   known blocks for this file
-	const uint readable_bytes = ((num_blocks - block_wanted) * _header -> block_size) - offset;
+	unsigned int readable_bytes = ((num_blocks - block_wanted) * _header -> block_size) - offset;
 
+	debugf("\tfile size: %d\n\treadable bytes: %d\n\trequested read size: %d\n",
+			node -> size, readable_bytes, size);
 
 	// check the number of readable bytes
 	//	if size > readable_bytes
@@ -408,7 +417,18 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 		debugf("truncating size down from %d to %d\n", size, readable_bytes);
 		size = readable_bytes;
 	}
-	
+
+	if ( size > node -> size )
+	{
+		debugf("\tsize > node -> size, truncating from %d to %d\n",
+				size, node -> size);
+		size = node -> size;
+	}
+
+
+
+	debugf("\t copying %d bytes into os buffer\n", size);
+
 	//copy the data from our buffer into the OS provided buffer
 	for ( j = 0 ; j < size ; ++j )
 	{
@@ -434,9 +454,11 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 {
 	debugf("fs_write: %s\n", path);
 
+	debugf("\tsize: %d\n\toffset: %d\n\n", size, offset);
+
 	if ((fi->flags & O_RDONLY) == O_RDONLY) {
 		debugf ("fs_write: File %s is read only.\n", path);
-		return -EROFS;
+		//return -EROFS;
 	}
 
 	NODEMAP::const_iterator iv = _nodes.find (path);
@@ -448,31 +470,51 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 
 	NODE *node = iv->second;
 
-	if (node->size == 0) {
+	if (node->mode & S_IFDIR  == S_IFDIR) {
 		debugf ("fs_write: %s is a directory.\n", path);
 		return -EISDIR;
 	}
 
+	
 	uint num_blocks = (node->size > 0) ? (node->size / _header->block_size + 1) : 0;
+
+	debugf("\tnum blocks = %d\n", num_blocks);
 
 	uint num_blocks_needed = ((size) / _header->block_size);
 	if (((size) % _header->block_size) != 0) {
 		num_blocks_needed ++;
 	}
 
+	debugf("\tblocks needed: %d\n", num_blocks_needed);
+
 	uint start_block = (offset / _header->block_size);
 	uint offset_in_block = (offset % _header->block_size);
 
+	debugf("\tstart block: %d\n\toffset in start: %d\n", start_block, offset_in_block);
+
 	uint i = 0;
 	if (num_blocks_needed > num_blocks) {
+		//make the block index array bigger
 		node->blocks = (uint64_t *) realloc (node->blocks, (num_blocks_needed * sizeof (uint64_t)));
+		
 		for (i = num_blocks; i < num_blocks_needed; i ++) {
 			BLOCK *block = (BLOCK *) malloc (sizeof (BLOCK));
 			block->data = (char *) malloc (sizeof (char) * _header->block_size);
 			_blocks.insert (std::pair <int, BLOCK *> (_next_block_id, block));
-			node->blocks [i] = _next_block_id ++;
+			node->blocks [i] = _next_block_id;
+			debugf("\tadded block with id: %d at node->block[%d]\n", _next_block_id, i);
+			++_next_block_id;
 		}
 	}
+
+	const unsigned int old_bytes = node -> size - offset;
+	const unsigned int new_size = old_bytes + size;
+
+	node -> size = new_size;
+
+
+	debugf("\nafter block add\n");
+	print_node(node);
 
 	i = start_block; //count for blocks
 	uint j = offset_in_block; //count for block data
@@ -493,7 +535,7 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 		i ++;
 	}
 
-	return 0;
+	return size;
 }
 
 //////////////////////////////////////////////////////////////////
@@ -522,7 +564,11 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	node -> atime = current_time;
 	node -> mtime = current_time;
 	node -> ctime = current_time;
-	
+	node -> size = 0;
+
+
+	debugf("adding node\n");
+	print_node(node);
 	_nodes.insert( pair<string, NODE*>(name, node) );
 	
 	return 0;
@@ -565,6 +611,11 @@ int fs_getattr(const char *path, struct stat *s)
 	// check if its a directory
 	const bool is_dir = (iv -> second -> mode & S_IFDIR) == S_IFDIR;
 
+	const unsigned int file_size = (float) num_blocks * (float) _header -> block_size;
+
+	debugf("\t\nnum_blocks: %d\n\tdisp size: %d\n\t miltiplier: %f\n",
+			num_blocks, display_block_size, multiplier);
+	debugf("\tfile size: %d\n", file_size);
 
 	NODE * node = iv -> second;
 	s -> st_mode = node -> mode;
@@ -573,7 +624,7 @@ int fs_getattr(const char *path, struct stat *s)
 	s -> st_uid = node -> uid;
 	s -> st_gid = node -> gid;
 	// if its a dir then the size should be 0
-	s -> st_size = is_dir ?  0 : (float) num_blocks * (float) display_block_size * (float) multiplier; // this part may be wrong
+	s -> st_size = is_dir ?  0 : file_size; // this part may be wrong
 	s -> st_atime = node -> atime;
 	s -> st_mtime = node -> mtime;
 	s -> st_ctime = node -> ctime;
@@ -887,7 +938,95 @@ int fs_rename(const char *path, const char *new_name)
 int fs_truncate(const char *path, off_t size)
 {
 	debugf("fs_truncate: %s to size %d\n", path, size);
-	return -EIO;
+	
+	NODEMAP::iterator iv = _nodes.find(path);
+	const string name = path;
+	NODE* node = NULL;
+	
+	if ( iv == _nodes.end() ) {
+		return -ENOENT;
+	}
+
+	node = iv -> second;
+
+	//cant truncate it to be bigger than it is
+	if ( (uint) size > node -> size ) {
+		debugf("fs_truncate: size is bigger than node -> size: %d %d\n", 
+				size, node -> size);
+		return -EIO;
+	}
+
+	const unsigned int num_to_keep = (size / _header -> block_size) + 1;
+	const unsigned int num_blocks = node -> size == 0 ? 0 : (node -> size / _header -> block_size) + 1;
+	const unsigned int block_offset = size % _header -> block_size;
+	
+
+	if ( node -> size == 0 )
+	{
+		debugf("\tnode -> size is 0, not truncating\n");
+		return 0;
+	}
+
+	if ( num_to_keep > num_blocks )
+	{
+		debugf("fs_truncate: cannot keep more blocks than we have: %d  %d\n",
+				num_to_keep, num_blocks);
+		return -EIO;
+	}
+
+	uint64_t  block_ids[num_blocks];
+
+	unsigned int i = 0, j = 0;
+
+	debugf("\tfetching the block ids\n");
+	for ( j = 0 ; j < num_blocks ; ++j )
+	{
+		debugf("\tj = %d  id = %d\n", j, block_ids[j]);
+		block_ids[j] = node -> blocks[j];
+	}
+
+
+	debugf("\tkeeping: %d\n\thave: %d\n\t", num_to_keep, num_blocks);
+
+	// realloc the space for the smaller number of nodes
+	node -> blocks = (uint64_t*) realloc(node -> blocks, num_to_keep * sizeof(uint64_t));
+	
+	debugf("\tcopying the remaining block ids back into the node\n");
+	for ( i = 0 ; i < num_to_keep ; ++i )
+	{
+		node -> blocks[i] = block_ids[i];
+	}
+
+
+	BLOCKMAP::iterator bv;
+	
+	for ( i = num_to_keep ; i < num_blocks ; ++i )
+	{
+		bv = _blocks.find(block_ids[i]);
+		debugf("\tremoving block with id : %d\n", block_ids[i]);
+		if ( bv != _blocks.end() )
+		{
+			_blocks.erase(bv);
+		}
+	}
+
+	if ( size == 0 )
+	{
+		debugf("\tpassed size was zero\n");
+		node -> size = 0;
+		return 0;
+	}
+
+	const unsigned int size_to_fill = _header -> block_size - block_offset;
+	bv = _blocks.find(node -> blocks[i]);
+
+	//clear the bytes
+	memset(bv -> second -> data, 0x0, size_to_fill);
+
+	//set the new node size
+	node -> size = size;
+	
+	return 0;
 }
 
 //////////////////////////////////////////////////////////////////
