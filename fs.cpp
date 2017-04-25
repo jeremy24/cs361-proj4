@@ -134,7 +134,6 @@ static void print_header( const BLOCK_HEADER * b )
 static void print_all_nodes(void)
 {
 	NODEMAP::iterator iv = _nodes.begin();
-	return;	
 	debugf("\nPrinting all nodes in map\n");
 	while ( iv != _nodes.end() )
 	{
@@ -366,13 +365,6 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 		return -EIO;
 	}
 
-	// this is not an error
-	//if ( new_offset >= _header->block_size )
-	//{
-	//	debugf("new_offset is >= block_size\n");
-	//	return -EIO;
-	//}
-
 	
 	// make a buffer that will hold all of the data from the starting block to
 	// the end of the file
@@ -396,7 +388,6 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 		//data[j * _header -> block_size]
 	}
 
-//	debugf("Data in our buffer:\n%s", data);
 
 	//set the src for the copy below
 	const char * src = (char*) (data) + new_offset;
@@ -410,6 +401,10 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 
 	debugf("\n\nSTATS\n\tfile size: %d\n\t\n\tdata length: %d\n\treadable bytes: %d\n\trequested read size: %d\n",
 			node -> size, data_length,  readable_bytes, size);
+
+	debugf("\tnum_blocks: %d\n", num_blocks);
+	debugf("\tblock_wanted: %d\n", block_wanted);
+
 
 	// check the number of readable bytes
 	//	if size > readable_bytes
@@ -440,6 +435,11 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 	//copy the data from our buffer into the OS provided buffer
 	for ( j = 0 ; j < size ; ++j )
 	{
+		if ( j >= data_length )
+		{
+			debugf("\nhit end of readable data\n");
+			break;
+		}
 		buf[j] = src[j];
 		++bytes_read;
 	}
@@ -551,7 +551,7 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 */
 
 	const unsigned int old_bytes = node -> size - offset;
-	const unsigned int new_size = old_bytes + size;
+	//const unsigned int new_size = old_bytes + size;
 
 	node -> size = offset + size;
 
@@ -570,7 +570,7 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 
 	debugf ("\t j = %d\n", j);
 	debugf("\nstarting write\n\n");
-	while (i < num_blocks_needed, k < size) {
+	while (/*i < num_blocks_needed,*/  k < size) {
 		block_id = node->blocks [i];
 		BLOCKMAP::iterator bv = _blocks.find(block_id);
 	
@@ -615,7 +615,7 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 //////////////////////////////////////////////////////////////////
 int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
-	debugf("fs_create: %s\n", path);
+	debugf("fs_create: [%s]\n", path);
 	NODE * node;
 	node = (NODE*) malloc( sizeof(NODE) );
 	uint i = 0;
@@ -625,6 +625,8 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	{
 		node -> name[i] = name[i];
 	}
+	
+	node -> name[name.length()] = '\0';
 
 	if ( fi -> flags & O_RDONLY ) {
 		return -EROFS;
@@ -642,7 +644,7 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	node -> ctime = current_time;
 	node -> size = 0;
 
-	debugf("adding node\n");
+	debugf("adding node with name: [%s]\n", node -> name);
 	print_node(node);
 	_header -> nodes += 1;
 	_nodes.insert( pair<string, NODE*>(name, node) );
@@ -712,6 +714,18 @@ int fs_getattr(const char *path, struct stat *s)
 	return 0;
 }
 
+
+static void rtrim( string & str )
+{
+	unsigned int i = 0;
+	for ( i = str.length() - 1 ; i > -1 ; --i )
+	{
+		if (str[i] != ' ' ) break;
+		str[i] = '\0';
+	}
+}
+
+
 //////////////////////////////////////////////////////////////////
 //Read a directory <path>. This uses the function <filler> to
 //write what directories and/or files are presented during an ls
@@ -743,8 +757,10 @@ int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	debugf("Root path: %s  length: %d\n", root_path.c_str(), root_path_len);
 	
 	// get to the fist contained item
-	++iv;
-	
+	//++iv;
+
+	iv++;
+
 	// iter through the values in the subtree based on root
 	while ( iv != _nodes.end() )
 	{
@@ -759,31 +775,53 @@ int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		if ( contains_root == string::npos ) 
 		{
 			++iv;
-			debugf("%s not under root path\n", local_path.c_str());
+			debugf("\t[%s] not under root path\n", local_path.c_str());
 			continue;
 		}
 
 		
 		local_path.erase(0, root_path_len);
-		debugf("after erase: %s\n", local_path.c_str());
+
+		debugf("\tafter first erase: [%s]  len: %d\n", 
+				local_path.c_str(), local_path.length());
+
+		if ( local_path.length() < 1 ) {
+			debugf("\tpath length < 1: %d\n", 
+					local_path.length());
+			++iv;
+			continue;
+		}
+
+		if ( local_path[0] == '/' )
+		{
+			debugf("\tremoving the leading slash\n");
+			local_path.erase(0,1); // remove leading slash
+		} 
+		else if ( root_path == "/" ) 
+		{
+			debugf("\tspecial case for the root path\n");
+		}
+		else 
+		{
+			debugf("\tnot leading slash, not under our root\n");
+			++iv;
+			break;
+		}
+
+		debugf("\tafter erase: [%s]\n", local_path.c_str());
 		
 		size_t has_slash = local_path.rfind("/");
+		
 
 		// if no slash is found or only a leading slash is found
 		if ( has_slash == string::npos) 
 		{
-			debugf("should add path: %s\n", local_path.c_str());
+			debugf("\tshould add path: [%s]\n", local_path.c_str());
+			rtrim(local_path);
 			filler(buf, local_path.c_str(), 0, 0);
 		}
 		
-		// if its a sub dir
-		if ( has_slash == 0 )
-		{	
-			debugf("its a subdir: %s\n", local_path.c_str());
-			local_path.erase(0,1);
-			filler(buf, local_path.c_str(), 0, 0);
-		}
-
+		
 		++iv;
 		
 	}
@@ -901,11 +939,14 @@ int fs_unlink(const char *p)
 			debugf("\tblockmap size: %d  _next_block_id = %d\n", _blocks.size(), _next_block_id);
 			return -EIO;
 		}
+		free ( bv -> second -> data );
+		free ( bv -> second );
 		_blocks.erase(bv);
 		_header -> blocks -= 1;
 	}
 
 	_header -> nodes -= 1;
+	free ( iv -> second );
 	_nodes.erase(iv);
 
 	return 0;
@@ -996,7 +1037,8 @@ int fs_rmdir(const char *path)
 	{
 		string local_path = iv -> second -> name;
 		size_t contains_root = local_path.find(root_path);
-		if ( contains_root != string::npos )
+		local_path.erase(0, root_path.length());
+		if ( contains_root != string::npos && local_path[0] == '/' )
 		{
 			debugf("\t%s contains %s\n", root_path.c_str(), local_path.c_str());
 			children++;
