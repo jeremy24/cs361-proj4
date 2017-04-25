@@ -397,7 +397,7 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 	//   this is the start pos of the start block all the way to the end of the 
 	//   known blocks for this file
 	unsigned int data_length = (num_blocks - block_wanted) * _header -> block_size;
-	unsigned int readable_bytes = (data_length) - offset;
+	unsigned int readable_bytes = data_length;
 
 	debugf("\n\nSTATS\n\tfile size: %d\n\t\n\tdata length: %d\n\treadable bytes: %d\n\trequested read size: %d\n",
 			node -> size, data_length,  readable_bytes, size);
@@ -491,12 +491,17 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 
 	debugf("\tnum blocks = %d\n", num_blocks);
 
+	debugf("\tfile size: %d\n", node -> size);
+
 	uint num_blocks_needed = ((size) / _header->block_size) + 1;
 
 	debugf("\tblocks needed: %d\n", num_blocks_needed);
 
 	uint start_block = (offset / _header->block_size);
 	uint offset_in_block = (offset % _header->block_size);
+
+	debugf("\t %d / %d = %d\n", 
+			offset, _header -> block_size, offset / _header -> block_size);
 
 	debugf("\tstart block: %d\n\toffset in start: %d\n", start_block, offset_in_block);
 
@@ -553,7 +558,16 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 	const unsigned int old_bytes = node -> size - offset;
 	//const unsigned int new_size = old_bytes + size;
 
-	node -> size = offset + size;
+	//node -> size = offset + size;
+
+	if ( node -> size > offset + size )
+	{
+		//do nothing, this is writing over old data
+	}
+	else
+	{
+		node -> size = offset + size;
+	}
 
 //	return size;
 
@@ -601,6 +615,7 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 
 
 	debugf("\nWROTE k = %d  NEEDED = %d\n", k, size);
+	debugf("\tNew file size: %d\n", node -> size);
 
 	return k;
 }
