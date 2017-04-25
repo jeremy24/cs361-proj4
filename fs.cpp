@@ -264,6 +264,7 @@ int fs_drive(const char *dname)
 		pair<int64_t, BLOCK*> data = pair<int64_t, BLOCK*>(j, block);
 		_blocks.insert(data);
 	}
+	infile.close();
 	printf("fs_drive complete\n");
 	return 0;
 }
@@ -332,7 +333,7 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 		}
 		debugf("\nGot block %d, storing at blocks[%d]\n", block_num,  i);
 		blocks[i] = bv ->second;
-		debugf("data:\n%s\n", blocks[i]->data);
+//		debugf("data:\n%s\n", blocks[i]->data);
 		++i;
 	}
 	
@@ -390,7 +391,7 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 		//data[j * _header -> block_size]
 	}
 
-	debugf("Data in our buffer:\n%s", data);
+//	debugf("Data in our buffer:\n%s", data);
 
 	//set the src for the copy below
 	const char * src = (char*) (data) + new_offset;
@@ -402,8 +403,8 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 	unsigned int data_length = (num_blocks - block_wanted) * _header -> block_size;
 	unsigned int readable_bytes = (data_length) - offset;
 
-	debugf("\n\nSTATS\n\tfile size: %d\n\treadable bytes: %d\n\trequested read size: %d\n",
-			node -> size, readable_bytes, size);
+	debugf("\n\nSTATS\n\tfile size: %d\n\t\n\tdata length: %d\n\treadable bytes: %d\n\trequested read size: %d\n",
+			node -> size, data_length,  readable_bytes, size);
 
 	// check the number of readable bytes
 	//	if size > readable_bytes
@@ -438,6 +439,9 @@ int fs_read(const char *path, char *buf, size_t size, off_t offset,
 		++bytes_read;
 	}
 
+	time_t curr_time = time(NULL);
+	iv -> second -> atime = curr_time;
+
 	debugf("bytes read: %d\n", bytes_read);
 	return bytes_read;
 }
@@ -458,11 +462,9 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 
 	debugf("\tsize: %d\n\toffset: %d\n\n", size, offset);
 
-	
-
-	if ((fi->flags & O_RDONLY) == O_RDONLY) {
+	if ((fi->flags & O_RDONLY)) {
 		debugf ("fs_write: File %s is read only.\n", path);
-		//return -EROFS;
+		return -EROFS;
 	}
 
 	NODEMAP::const_iterator iv = _nodes.find (path);
@@ -491,20 +493,42 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 	uint start_block = (offset / _header->block_size);
 	uint offset_in_block = (offset % _header->block_size);
 
-	
-	
-
-	
-	//return size;
-
-
-
-
-
 	debugf("\tstart block: %d\n\toffset in start: %d\n", start_block, offset_in_block);
 
 	uint i = 0;
-	if (num_blocks_needed > num_blocks-start_block) {
+
+	const uint total_blocks_needed = ((size + offset) / _header -> block_size) + 1;
+	const uint have_blocks = node -> size == 0 ?  0 : ( node -> size / _header -> block_size) + 1;
+	
+
+	
+	if ( total_blocks_needed > have_blocks )
+	{
+		debugf("\t need %d have %d\n", total_blocks_needed , have_blocks);
+		
+		if ( have_blocks == 0 ) {
+			node -> blocks = (uint64_t*) malloc(total_blocks_needed * sizeof(uint64_t));
+		} else {
+			node -> blocks = (uint64_t*) realloc(node -> blocks , total_blocks_needed * sizeof(uint64_t));
+		}
+
+		for ( i = have_blocks ; i < total_blocks_needed ; ++i )
+		{
+			BLOCK * block = (BLOCK*) malloc(sizeof(BLOCK));
+			block -> data = (char*) malloc(_header -> block_size);
+			_blocks.insert(pair<uint64_t, BLOCK*>(_next_block_id, block));
+			node -> blocks[i] = _next_block_id;
+			debugf("\t added block with id %d at node -> blocks[%d]\n", _next_block_id, i);
+			++_next_block_id;
+			_header -> blocks += 1;
+		}
+
+	}
+
+	/*
+
+
+	if (num_blocks_needed > need_after_start) {
 		//make the block index array bigger
 		node->blocks = (uint64_t *) realloc (node->blocks, (num_blocks_needed * sizeof (uint64_t)));
 		
@@ -519,11 +543,12 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 			_header -> blocks += 1;
 		}
 	}
+*/
 
 	const unsigned int old_bytes = node -> size - offset;
 	const unsigned int new_size = old_bytes + size;
 
-	node -> size += new_size;
+	node -> size = offset + size;
 
 //	return size;
 
@@ -548,22 +573,29 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 
 		if ( bv == _blocks.end() )
 		{
+			debugf("ERROR! cant find block with id = %d\n", block_id);
 			return -EIO;
 		}
 
 		BLOCK * block = bv -> second;
 
-		while (j < _header->block_size , k < size) {
+		while (j < _header->block_size && k < size) {
 			block -> data[j] = data[k];
 			++k;
 			++j;
 		}
-		debugf("\twrote %d bytes\n", k);
-		debugf("\tDATA\n %s", block -> data);
+		debugf("\twrote %d bytes  j = %d\n", k, j);
+		//debugf("\tDATA\n %s", block -> data);
 		j = 0; //offset doesn't matter after first block
 		i ++;
 	}
 
+	time_t curr_time = time(NULL);
+	node -> atime = curr_time;
+	node -> mtime = curr_time;
+
+
+	debugf("\nWROTE k = %d  NEEDED = %d\n", k, size);
 
 	return k;
 }
@@ -639,7 +671,7 @@ int fs_getattr(const char *path, struct stat *s)
 	}
 
 	// get the number of blocks this node has
-	const unsigned int num_blocks = (iv -> second -> size /  _header -> block_size) + 1;
+	unsigned int num_blocks = (iv -> second -> size /  _header -> block_size) + 1;
 	
 	// this is for displaying the stats
 	//   its 512 * number of blocks
@@ -650,7 +682,9 @@ int fs_getattr(const char *path, struct stat *s)
 	// check if its a directory
 	const bool is_dir = (iv -> second -> mode & S_IFDIR) == S_IFDIR;
 
-	const unsigned int file_size = (float) num_blocks * (float) _header -> block_size;
+	unsigned int file_size = iv -> second -> size;
+
+	if ( file_size == 0 ) num_blocks = 0;
 
 	debugf("\t\nnum_blocks: %d\n\tdisp size: %d\n\t miltiplier: %f\n",
 			num_blocks, display_block_size, multiplier);
@@ -854,7 +888,14 @@ int fs_unlink(const char *p)
 	{
 		uint id = iv -> second -> blocks[i];
 		debugf("\tremoving block: %d\n", id);
-		_blocks.erase(_blocks.find(id));
+		BLOCKMAP::iterator bv = _blocks.find(id);
+		if ( bv == _blocks.end() )
+		{
+			debugf("\tERROR: trying to remove a non existant block: id = %d\n", id);
+			debugf("\tblockmap size: %d  _next_block_id = %d\n", _blocks.size(), _next_block_id);
+			return -EIO;
+		}
+		_blocks.erase(bv);
 		_header -> blocks -= 1;
 	}
 
@@ -899,12 +940,19 @@ int fs_mkdir(const char *path, mode_t mode)
 	// set the mode
 	node -> mode = mode | S_IFDIR;
 
+	time_t curr_time = time(NULL);
+	node -> atime = curr_time;
+	node -> mtime = curr_time;
+	node -> ctime = curr_time;
+	
+	node -> size = 0;
 
 	// make the pair and insert
 	pair<string, NODE*> data = pair<string, NODE *>(name, node);
 	_nodes.insert( data );
 
 	_header -> nodes += 1;
+
 
 	iv = _nodes.find(path);
 	if ( iv == _nodes.end())
@@ -1102,9 +1150,6 @@ int fs_truncate(const char *path, off_t size)
 
 	const unsigned int size_to_fill = _header -> block_size - block_offset;
 	bv = _blocks.find(node -> blocks[i]);
-
-	//clear the bytes
-	memset(bv -> second -> data, 0x0, size_to_fill);
 
 	//set the new node size
 	node -> size = size;
