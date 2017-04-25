@@ -18,6 +18,7 @@
 #include <fcntl.h>
 #include <fs.h>
 
+
 // our includes
 #include <fstream>
 #include <iostream>
@@ -99,8 +100,11 @@ BLOCK_HEADER * _header;
 unsigned int _next_block_id = -1;
 
 static void print_node(const NODE * local_node){
+
+	return;
+
 	debugf("file: %s\n\tid: %lu\n\tlink_id: %lu\n\t",
-		local_node->name, local_node->id, local_node->link_id);
+			local_node->name, local_node->id, local_node->link_id);
     debugf("mode: %lu\n\tctime: %lu\n\tatime: %lu\n\t",
 		local_node->mode, local_node->ctime, local_node-> atime);
 	debugf("mtime: %lu\n\tuid: %u\n\tgid: %u\n\tsize: %lu\n",
@@ -119,6 +123,7 @@ static void print_node(const NODE * local_node){
 
 static void print_header( const BLOCK_HEADER * b )
 {
+	return;
 	debugf("Header:\n");
 	debugf("\tMagic: %s\n", b -> magic);
 	debugf("\tBlock size: %lu\n", b -> block_size);
@@ -129,7 +134,7 @@ static void print_header( const BLOCK_HEADER * b )
 static void print_all_nodes(void)
 {
 	NODEMAP::iterator iv = _nodes.begin();
-	
+	return;	
 	debugf("\nPrinting all nodes in map\n");
 	while ( iv != _nodes.end() )
 	{
@@ -476,7 +481,7 @@ int fs_write(const char *path, const char *data, size_t size, off_t offset,
 
 	NODE *node = iv->second;
 
-	if (node->mode & S_IFDIR  == S_IFDIR) {
+	if (node->mode & S_IFDIR) {
 		debugf ("fs_write: %s is a directory.\n", path);
 		return -EISDIR;
 	}
@@ -746,7 +751,8 @@ int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		
 		string local_path = iv -> second -> name;
 		debugf("local path: %s\n", local_path.c_str());
-		
+		//std::cout << "cout local " << local_path << endl;
+	
 		size_t contains_root = local_path.find(root_path);
 
 		// make sure the local path is under the root path
@@ -762,7 +768,7 @@ int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		debugf("after erase: %s\n", local_path.c_str());
 		
 		size_t has_slash = local_path.rfind("/");
-		
+
 		// if no slash is found or only a leading slash is found
 		if ( has_slash == string::npos) 
 		{
@@ -1032,9 +1038,35 @@ int fs_rename(const char *path, const char *new_name)
 	if (_nodes.find(new_name) == _nodes.end() )
 	{
 		debugf("\tnew path does not exist");
-		return -ENOENT;
+		//return -ENOENT;
 	}
+/*
+	const string parent = path;
+	const string new_parent = new_name;
+	//vector<string> kids;
+	
+	NODEMAP::iterator itor = _nodes.begin();
 
+	while ( iv != _nodes.end() )
+	{
+		string local_path = itor -> second -> name;
+		size_t contains_parent = local_path.find(parent);
+		if ( contains_parent != string::npos )
+		{
+			local_path.erase(contains_parent, parent.length());
+			local_path = new_parent + "/" + local_path;
+			for (unsigned  int i = 0 ; i < local_path.length() ; ++i )
+			{
+				itor -> second -> name[i] = local_path[i];
+			}
+			itor -> second -> name[local_path.length()] = '\0';
+		}
+		iv++;
+	}
+*/
+
+
+	
 	NODE * node = iv -> second;
 	const string name = new_name;
 	
@@ -1056,6 +1088,7 @@ int fs_rename(const char *path, const char *new_name)
 	_nodes.insert( data );
 
 	return 0;
+	
 }
 
 //////////////////////////////////////////////////////////////////
